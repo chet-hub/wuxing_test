@@ -2,75 +2,13 @@
 -- States: 1=Wood(Green), 2=Fire(Red), 3=Earth(Yellow), 4=Metal(White), 5=Water(Blue)
 -- Controls: Space=Pause/Resume, R=Reset, D=Debug, S=Step, +/-=Speed, 1-5+Click=Paint
 
-local grid_size = 200
-local cell_size = 5
+-- Adjustable parameters
+local grid_size = 80
+local cell_size = 8
 local update_interval = 0.3
+local brush_size = 8
 
--- Energy thresholds (adjustable parameters)
- 
-
---[[  
-
-### 1. `birth_energy_threshold = 3`
-* **作用**：当一个空白格（`current = 0`）周围有足够能量的“生成信号”时，这个阈值决定它能否生成新元素。
-* **逻辑**：
-  * 计算周围邻居元素对当前空格的“生成能量”（根据生克关系）。
-  * 如果能量 ≥ `birth_energy_threshold`，空格就有机会诞生一个新元素。
-* **调整影响**：
-  * 调高 → 新元素更难诞生，网格空白更多。
-  * 调低 → 新元素更容易生成，整个网格更活跃。
-### 2. `transform_energy_threshold = 3`
-* **作用**：决定已有元素在周围能量作用下是否“转化”成它所生的元素。
-* **逻辑**：
-  * 如果当前元素周围的 **生能量 - 克能量** ≥ `transform_energy_threshold`，它就会变成它生的下一个五行元素（如木生火 → 木转火）。
-* **调整影响**：
-  * 调高 → 元素转化更困难，格局更稳定。
-  * 调低 → 元素更容易变化，格局更动态。
-### 3. `death_energy_threshold = -2`
-* **作用**：当元素周围受克能量过大时，判断是否被克制而死亡或被替换。
-* **逻辑**：
-  * 如果 **周围能量** ≤ `death_energy_threshold`，元素会被它的克制元素随机替代或消亡。
-* **调整影响**：
-  * 调高（绝对值减小） → 元素更容易死亡，格局不稳定。
-  * 调低 → 元素更抗击打，生存能力强。
-### 4. `disappear_energy_threshold = -3`
-* **作用**：当元素受到极端负能量（被克制非常严重）时，它直接消失（空格化）。
-* **逻辑**：
-  * 能量 ≤ `disappear_energy_threshold` → 元素消失，不被替代。
-* **调整影响**：
-  * 调高 → 元素容易消失，网格稀疏。
-  * 调低 → 元素更稳定，不易消失。
-### 5. `random_death_rate = 0.01`
-* **作用**：模拟随机死亡或突发事件的概率。
-* **逻辑**：
-  * 每次更新时，每个元素有 `1%` 的概率直接消失或被清空。
-* **调整影响**：
-  * 调高 → 元素随机性增加，格局更混乱。
-  * 调低 → 元素随机死亡很少，格局更规律。
-### 6. `neighbor_birth_threshold = 3`
-* **作用**：空格周围至少有多少邻居元素时，才有可能生成新元素。
-* **逻辑**：
-  * 如果周围非空邻居数量 ≥ 3，则空格有机会诞生新元素（结合 `birth_probability`）。
-* **调整影响**：
-  * 调高 → 新元素生成需要更多邻居，稀疏。
-  * 调低 → 新元素容易生成，网格更密集。
-### 7. `birth_probability = 0.3`
-* **作用**：控制空格生成新元素的随机概率。
-* **逻辑**：
-  * 空格满足生成条件后，仍以 `30%` 的概率生成新元素，其余保持空格。
-* **调整影响**：
-  * 调高 → 空格生成新元素更频繁，格局活跃。
-  * 调低 → 新元素生成不稳定，空白更多。
-💡 **总结**：
-* `birth_energy_threshold` + `neighbor_birth_threshold` + `birth_probability` → 控制 **新元素诞生规则**。
-* `transform_energy_threshold` → 控制 **已有元素转化规则**。
-* `death_energy_threshold` + `disappear_energy_threshold` + `random_death_rate` → 控制 **元素消亡或克制规则**。
-整体上，这些参数就像 **五行的生态系统调节器**，调节能量阈值就能让元胞机呈现不同的“循环平衡”或“动荡格局”。
-
-]]
-
-
-
+-- Energy thresholds (adjustable with hotkeys)
 local birth_energy_threshold = 3
 local transform_energy_threshold = 3
 local death_energy_threshold = -2
@@ -89,13 +27,13 @@ local ke = {[1]=3, [2]=4, [3]=5, [4]=1, [5]=2}      -- Destruction: Wood->Earth,
 local timer = 0
 local is_paused = false
 local generation = 0
-local brush_element = 0  -- 0=no brush, 1-5=element brush
+local brush_element = -1  -- -1=disabled, 0=erase, 1-5=element brush
 local stats = {0, 0, 0, 0, 0}
 
 function love.load()
-    love.window.setMode(grid_size * cell_size + 200, grid_size * cell_size)
+    love.window.setMode(grid_size * cell_size + 250, grid_size * cell_size + 50)
     love.window.setTitle("Wu Xing Cellular Automaton")
-    love.graphics.setFont(love.graphics.newFont(12))
+    love.graphics.setFont(love.graphics.newFont(12))  -- Smaller font for smaller cells
     
     math.randomseed(os.time())
     initialize_with_pattern()
@@ -107,7 +45,56 @@ function love.load()
     print("+/-: Adjust speed")
     print("P: Special pattern")
     print("1-5 + Click: Paint elements")
-    print("D: Debug info")
+    print("6 + Click: Erase (empty)")
+    print("0: Disable brush")
+    print("")
+    print("Grid Size:")
+    print("[ ]: Increase/Decrease grid size")
+    print("")
+    print("Thresholds (Q/W/E/R/T/Y/U):")
+    print("Q/A: Birth energy ±1")
+    print("W/S: Transform energy ±1") 
+    print("E/D: Death energy ±1")
+    print("R/F: Disappear energy ±1")
+    print("T/G: Neighbor birth threshold ±1")
+    print("Y/H: Random death rate ±0.01")
+    print("U/J: Birth probability ±0.1")
+end
+
+function resize_grid(new_size)
+    local old_grid = {}
+    local old_size = grid_size
+    
+    -- Save current grid
+    for i = 1, old_size do
+        old_grid[i] = {}
+        for j = 1, old_size do
+            old_grid[i][j] = grid[i][j]
+        end
+    end
+    
+    grid_size = math.max(20, math.min(200, new_size))  -- Clamp between 20-200
+    
+    -- Resize window
+    love.window.setMode(grid_size * cell_size + 250, grid_size * cell_size + 50)
+    
+    -- Create new grid
+    grid = {}
+    next_grid = {}
+    for i = 1, grid_size do
+        grid[i] = {}
+        next_grid[i] = {}
+        for j = 1, grid_size do
+            -- Copy from old grid if within bounds, otherwise empty
+            if i <= old_size and j <= old_size then
+                grid[i][j] = old_grid[i][j]
+            else
+                grid[i][j] = 0
+            end
+        end
+    end
+    
+    print("Grid resized to " .. grid_size .. "x" .. grid_size)
 end
 
 function initialize_with_pattern()
@@ -264,17 +251,35 @@ function love.update(dt)
     end
 end
 
+local brush_size = 8
+
 function love.mousepressed(x, y, button)
-    if button == 1 and brush_element > 0 then  -- Left click with brush
-        local grid_x = math.floor(y / cell_size) + 1
-        local grid_y = math.floor(x / cell_size) + 1
-        
-        if grid_x >= 1 and grid_x <= grid_size and grid_y >= 1 and grid_y <= grid_size then
-            grid[grid_x][grid_y] = brush_element
-            print("Painted " .. symbols[brush_element] .. " at (" .. grid_x .. "," .. grid_y .. ")")
+    if button == 1 and brush_element >= 0 then  -- 左键画笔
+        local grid_cx = math.floor(y / cell_size) + 1  -- 中心格子坐标
+        local grid_cy = math.floor(x / cell_size) + 1
+
+        -- 半径（因为要以中心扩展）
+        local half = math.floor(brush_size / 2)
+
+        -- 遍历方形区域
+        for gx = grid_cx - half, grid_cx + half do
+            for gy = grid_cy - half, grid_cy + half do
+                if gx >= 1 and gx <= grid_size and gy >= 1 and gy <= grid_size then
+                    grid[gx][gy] = brush_element
+                end
+            end
+        end
+
+        -- 打印提示
+        if brush_element == 0 then
+            print("Erased area centered at (" .. grid_cx .. "," .. grid_cy .. "), size=" .. brush_size)
+        else
+            print("Painted " .. symbols[brush_element] ..
+                  " area centered at (" .. grid_cx .. "," .. grid_cy .. "), size=" .. brush_size)
         end
     end
 end
+
 
 function love.keypressed(key)
     if key == "space" then
@@ -290,10 +295,10 @@ function love.keypressed(key)
             print("Single step - Generation: " .. generation)
         end
     elseif key == "=" or key == "kp+" then
-        update_interval = math.max(0.01, update_interval - 0.01)
+        update_interval = math.max(0.05, update_interval - 0.05)
         print("Speed up - Interval: " .. string.format("%.2f", update_interval))
     elseif key == "-" or key == "kp-" then
-        update_interval = update_interval + 0.01
+        update_interval = update_interval + 0.05
         print("Speed down - Interval: " .. string.format("%.2f", update_interval))
     elseif key == "p" then
         -- Create special Wu Xing ring pattern
@@ -332,12 +337,75 @@ function love.keypressed(key)
     elseif key == "5" then
         brush_element = 5
         print("Brush set to Water (Blue)")
-    elseif key == "0" then
+    elseif key == "6" then
         brush_element = 0
+        print("Brush set to Erase (Empty)")
+    elseif key == "0" then
+        brush_element = -1  -- Disabled state
         print("Brush disabled")
+    elseif key == "8" then
+        brush_size = brush_size - 1  
+    elseif key == "9" then
+        brush_size = brush_size + 1  
+    elseif key == "[" then
+        resize_grid(grid_size - 10)
+    elseif key == "]" then
+        resize_grid(grid_size + 10)
+    -- Threshold controls
+    elseif key == "q" then
+        birth_energy_threshold = birth_energy_threshold + 1
+        print("Birth energy threshold: " .. birth_energy_threshold)
+    elseif key == "a" then
+        birth_energy_threshold = birth_energy_threshold - 1
+        print("Birth energy threshold: " .. birth_energy_threshold)
+    elseif key == "w" then
+        transform_energy_threshold = transform_energy_threshold + 1
+        print("Transform energy threshold: " .. transform_energy_threshold)
+    elseif key == "s" then
+        transform_energy_threshold = transform_energy_threshold - 1
+        print("Transform energy threshold: " .. transform_energy_threshold)
+    elseif key == "e" then
+        death_energy_threshold = death_energy_threshold + 1
+        print("Death energy threshold: " .. death_energy_threshold)
     elseif key == "d" then
+        death_energy_threshold = death_energy_threshold - 1
+        print("Death energy threshold: " .. death_energy_threshold)
+    elseif key == "r" then
+        disappear_energy_threshold = disappear_energy_threshold + 1
+        print("Disappear energy threshold: " .. disappear_energy_threshold)
+    elseif key == "f" then
+        disappear_energy_threshold = disappear_energy_threshold - 1
+        print("Disappear energy threshold: " .. disappear_energy_threshold)
+    elseif key == "t" then
+        neighbor_birth_threshold = math.min(8, neighbor_birth_threshold + 1)
+        print("Neighbor birth threshold: " .. neighbor_birth_threshold)
+    elseif key == "g" then
+        neighbor_birth_threshold = math.max(1, neighbor_birth_threshold - 1)
+        print("Neighbor birth threshold: " .. neighbor_birth_threshold)
+    elseif key == "y" then
+        random_death_rate = math.min(1.0, random_death_rate + 0.01)
+        print("Random death rate: " .. string.format("%.3f", random_death_rate))
+    elseif key == "h" then
+        random_death_rate = math.max(0.0, random_death_rate - 0.01)
+        print("Random death rate: " .. string.format("%.3f", random_death_rate))
+    elseif key == "u" then
+        birth_probability = math.min(1.0, birth_probability + 0.1)
+        print("Birth probability: " .. string.format("%.2f", birth_probability))
+    elseif key == "j" then
+        birth_probability = math.max(0.0, birth_probability - 0.1)
+        print("Birth probability: " .. string.format("%.2f", birth_probability))
+    elseif key == "z" then  -- Debug info (moved from 'd' to avoid conflict)
         print("Generation: " .. generation)
+        print("Grid size: " .. grid_size .. "x" .. grid_size)
         print("Element distribution - Wood:" .. stats[1] .. " Fire:" .. stats[2] .. " Earth:" .. stats[3] .. " Metal:" .. stats[4] .. " Water:" .. stats[5])
+        print("Current thresholds:")
+        print("  Birth energy: " .. birth_energy_threshold)
+        print("  Transform energy: " .. transform_energy_threshold)  
+        print("  Death energy: " .. death_energy_threshold)
+        print("  Disappear energy: " .. disappear_energy_threshold)
+        print("  Neighbor birth: " .. neighbor_birth_threshold)
+        print("  Random death rate: " .. string.format("%.3f", random_death_rate))
+        print("  Birth probability: " .. string.format("%.2f", birth_probability))
         
         -- Show center area details
         local center = math.floor(grid_size/2)
@@ -365,55 +433,142 @@ function love.draw()
                 love.graphics.setColor(colors[element])
                 love.graphics.rectangle("fill", (j-1)*cell_size, (i-1)*cell_size, cell_size-1, cell_size-1)
                 
-                -- Draw symbol
-                love.graphics.setColor(0, 0, 0)
-                love.graphics.print(symbols[element], (j-1)*cell_size + 2, (i-1)*cell_size + 1)
+                -- Draw symbol (only if cell is big enough)
+                if cell_size >= 10 then
+                    love.graphics.setColor(0, 0, 0)
+                    love.graphics.print(symbols[element], (j-1)*cell_size + 1, (i-1)*cell_size)
+                end
+            end
+        end
+    end
+    
+    -- Draw brush preview
+    if brush_element >= 0 then
+        local mx, my = love.mouse.getPosition()
+        local center_x = math.floor(my / cell_size) + 1
+        local center_y = math.floor(mx / cell_size) + 1
+        local half_size = math.floor(brush_size / 2)
+        
+        for dx = -half_size, half_size do
+            for dy = -half_size, half_size do
+                local grid_x = center_x + dx
+                local grid_y = center_y + dy
+                
+                if grid_x >= 1 and grid_x <= grid_size and grid_y >= 1 and grid_y <= grid_size then
+                    love.graphics.setColor(1, 1, 1, 0.8)  -- Semi-transparent white
+                    love.graphics.rectangle("line", (grid_y-1)*cell_size, (grid_x-1)*cell_size, cell_size-1, cell_size-1)
+                end
             end
         end
     end
     
     -- Draw info panel
     love.graphics.setColor(1, 1, 1)
-    local info_x = grid_size * cell_size + 10
-    love.graphics.print("Wu Xing Cellular Automaton", info_x, 20)
-    love.graphics.print("Generation: " .. generation, info_x, 50)
-    love.graphics.print("Speed: " .. string.format("%.2f", update_interval) .. "s", info_x, 70)
-    love.graphics.print(is_paused and "Status: Paused" or "Status: Running", info_x, 90)
+    local info_x = grid_size * cell_size + 15
+    local y_offset = 25
+    
+    love.graphics.print("Wu Xing Cellular Automaton", info_x, y_offset)
+    y_offset = y_offset + 25
+    
+    love.graphics.print("Generation: " .. generation, info_x, y_offset)
+    y_offset = y_offset + 20
+    
+    love.graphics.print("Grid: " .. grid_size .. "x" .. grid_size, info_x, y_offset)
+    y_offset = y_offset + 20
+    
+    love.graphics.print("Speed: " .. string.format("%.2f", update_interval) .. "s", info_x, y_offset)
+    y_offset = y_offset + 20
+    
+    love.graphics.print(is_paused and "Status: PAUSED" or "Status: RUNNING", info_x, y_offset)
+    y_offset = y_offset + 30
     
     -- Brush info
     if brush_element > 0 then
         love.graphics.setColor(colors[brush_element])
-        love.graphics.print("Brush: " .. symbols[brush_element], info_x, 110)
+        love.graphics.print("Brush: " .. symbols[brush_element] .. " (" .. brush_size .. "x" .. brush_size .. ")", info_x, y_offset)
+    elseif brush_element == 0 then
+        love.graphics.setColor(0.8, 0.8, 0.8)
+        love.graphics.print("Brush: ERASE (" .. brush_size .. "x" .. brush_size .. ")", info_x, y_offset)
     else
         love.graphics.setColor(0.5, 0.5, 0.5)
-        love.graphics.print("Brush: Off", info_x, 110)
+        love.graphics.print("Brush: OFF", info_x, y_offset)
     end
+    y_offset = y_offset + 35
     
     -- Element statistics
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print("=== Element Count ===", info_x, 140)
+    love.graphics.setColor(0.9, 0.9, 0.9)
+    love.graphics.print("=== ELEMENT COUNT ===", info_x, y_offset)
+    y_offset = y_offset + 25
+    
     local element_names = {"Wood", "Fire", "Earth", "Metal", "Water"}
     for i = 1, 5 do
         love.graphics.setColor(colors[i])
-        love.graphics.print(element_names[i] .. ": " .. stats[i], info_x, 160 + i * 20)
+        love.graphics.print(element_names[i] .. ": " .. stats[i], info_x, y_offset)
+        y_offset = y_offset + 18
     end
+    y_offset = y_offset + 15
+    
+    -- Thresholds
+    love.graphics.setColor(0.9, 0.9, 0.6)
+    love.graphics.print("=== THRESHOLDS ===", info_x, y_offset)
+    y_offset = y_offset + 25
+    
+    love.graphics.print("Birth Energy: " .. birth_energy_threshold .. " (Q/A)", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Transform E: " .. transform_energy_threshold .. " (W/S)", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Death Energy: " .. death_energy_threshold .. " (E/D)", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Disappear E: " .. disappear_energy_threshold .. " (R/F)", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Neighbor: " .. neighbor_birth_threshold .. " (T/G)", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Death Rate: " .. string.format("%.3f", random_death_rate) .. " (Y/H)", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Birth Prob: " .. string.format("%.2f", birth_probability) .. " (U/J)", info_x, y_offset)
+    y_offset = y_offset + 25
     
     -- Controls
     love.graphics.setColor(0.8, 0.8, 0.8)
-    love.graphics.print("=== Controls ===", info_x, 280)
-    love.graphics.print("Space: Pause/Resume", info_x, 300)
-    love.graphics.print("S: Single step", info_x, 320)
-    love.graphics.print("+/-: Speed control", info_x, 340)
-    love.graphics.print("R: Reset", info_x, 360)
-    love.graphics.print("P: Ring pattern", info_x, 380)
-    love.graphics.print("1-5: Set brush", info_x, 400)
-    love.graphics.print("0: Disable brush", info_x, 420)
-    love.graphics.print("D: Debug info", info_x, 440)
+    love.graphics.print("=== CONTROLS ===", info_x, y_offset)
+    y_offset = y_offset + 25
     
-    -- Wu Xing relationships
-    love.graphics.print("=== Wu Xing Rules ===", info_x, 500)
-    love.graphics.print("Generation: W->F->E->M->A->W", info_x, 520)
-    love.graphics.print("Destruction: W>E, F>M", info_x, 540)
-    love.graphics.print("             E>A, M>W", info_x, 560)
-    love.graphics.print("             A>F", info_x, 580)
+    love.graphics.print("Space: Pause/Resume", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("S: Single Step", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("+/-: Speed Control", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("[ ]: Grid Size", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("P: Ring Pattern", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("1-5: Set Brush", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("6: Erase Brush", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("9/8: Brush Size", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("0: Disable Brush", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Z: Debug Info", info_x, y_offset)
+    y_offset = y_offset + 25
+    
+    -- Wu Xing relationships  
+    love.graphics.setColor(0.6, 0.8, 1.0)
+    love.graphics.print("=== WU XING RULES ===", info_x, y_offset)
+    y_offset = y_offset + 25
+    love.graphics.print("Generation Cycle:", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Wood → Fire → Earth", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("→ Metal → Water → Wood", info_x, y_offset)
+    y_offset = y_offset + 20
+    love.graphics.print("Destruction Cycle:", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Wood > Earth, Fire > Metal", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Earth > Water, Metal > Wood", info_x, y_offset)
+    y_offset = y_offset + 18
+    love.graphics.print("Water > Fire", info_x, y_offset)
 end
